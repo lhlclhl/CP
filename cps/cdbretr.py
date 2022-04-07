@@ -233,10 +233,6 @@ class RAM_CTR(RetrAndMatch):
 		inds = (-scores).argsort()
 		cands = [(cands[i][0], scores[i], cands[i][-1]) for i in inds]
 
-		# minS = min(s for _, s, _ in cands) if cands and base else 0
-		# cands = [(w, (s-minS)*135., c) for w, s, c in cands]
-		# return cands
-
 		maxS = max(s for _, s, _ in cands)
 		minS = min(s for _, s, _ in cands) if len(cands)>=limit else 0
 		W = Z = 1; B = 0 # weight, normalizer, and base score
@@ -251,7 +247,29 @@ class RAM_CTR(RetrAndMatch):
 		B = minS/Z if self.base<0 else self.base # base score
 		cands = [(w, W*max(s/Z-B, 0), c) for w, s, c in cands]
 		return cands
-	
+class RAM_CTR_NN(RAM_CTR):
+	def generate(self, clue, length, limit=None, blacklist=set(), pagesize=None, **kwargs):
+		if limit is None: limit = self.limit
+		ctokens = tokenize(clue)
+		blacklist = blacklist | {string2fill(t) for t in ctokens} # should not include any words in the clue
+		cands = self.retrieve(clue, length, limit*2, blacklist)
+		if not cands: return cands
+		cdepunc = self.prepclue(clue)
+		samples = []
+		for w, s, c in cands:
+			cdp = self.prepclue(c)
+			if self.equals(cdepunc, cdp): c = clue
+			samples.append((clue, c))
+		scores = self.matcher.do_batch(samples)[0].flatten()
+		inds = (-scores).argsort()
+		cands = [(cands[i][0], scores[i], cands[i][-1]) for i in inds]
+
+		W = abs(self.norm)
+		base = cands[limit][1] if len(cands)>limit else 0
+		Z = 1-base
+		cands = [(w, (s-base)/Z*W, c) for w, s, c in cands][:limit]
+		return cands
+
 def align_scores(mc1, mc2, kwargs1={}, kwargs2={}, pzlfile="data/puzzles/nyt.new.ra.txt", limit=100):
 	m1 = mc1(dbname="cluedblfs", dirn="data/clues", **kwargs1)
 	m2 = mc2(dbname="cluedblfs", dirn="data/clues", **kwargs2)
@@ -287,8 +305,8 @@ def align_scores(mc1, mc2, kwargs1={}, kwargs2={}, pzlfile="data/puzzles/nyt.new
 			if limit == 0: break
 	print("Average K: %s"%(sum(ks)/len(ks)))
 
-def test_one(mclass=ClueES, clue="Something done for kicks?", length=6, **kwargs):
-	cluedb = mclass(dbname="cluedb210415", dirn="data/clues_full", norm=-26.39, **kwargs)#ClueES(dbname="cluedb190322", dirn="data/clues_before_2019-03-22")#
+def test_one(mclass=ClueES, clue="Something done for kicks?", length=6, dbname="cluedb210415", dirn="data/clues_full", norm=-26.39, **kwargs):
+	cluedb = mclass(dbname=dbname, dirn=dirn, norm=norm, **kwargs)#ClueES(dbname="cluedb190322", dirn="data/clues_before_2019-03-22")#
 	ret = cluedb.generate(clue, length)#'Marks so as to avoid bouncing, perhaps', 8)#, target_clue="John McTammany, inventor of the player ___")
 	for item in ret:
 		print(item)
@@ -296,6 +314,15 @@ def test_one(mclass=ClueES, clue="Something done for kicks?", length=6, **kwargs
 
 if __name__ == "__main__":
 	align_scores(ClueES, RAM_CTR, {"norm": -26.39, "upper": 2}, {"norm": -26.39, "upper": 2, "MM": 1, "n_negs": 1, "batch_size": 340})
-	#test_one(RAM_CTR, MM=1, n_negs=1, batch_size=340)
+	# test_one()
+	# test_one(RAM_CTR, MM=1, n_negs=1, batch_size=340, **{
+	# 		"dbname": "cluedb210415", 
+	# 		"dirn": "data/clues_full", 
+	# 		"limit": 50, 
+	# 		"norm": -22.17, 
+	# 		"base": -1, 
+	# 		"upper": 0
+	# 	})
+	
 	#test_one(clue="Tipping point?", length=3)
 

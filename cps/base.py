@@ -458,7 +458,7 @@ class LogEvalSave(CSVLogger):
 		toc = time.time()
 		res = self.caller.eval()
 		sel = self.select(res)
-		# 选择效果最好的模型保存
+
 		if sel <= self.best:
 			self.best = sel
 			self.caller.save(self.save_dir)

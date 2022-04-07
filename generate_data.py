@@ -29,12 +29,12 @@ if not exists(bufdir): os.makedirs(bufdir)
 from cps.mcts import method_list
 
 def run_DG(fn, time_limit=100, cand_limit=50, method="MCTS_DG", start_from=None, end_with=None, \
-append=False, output=None, args=None, date_after="3/22/2019", **kwargs):
+append=False, output=None, args=None, date_after="6/18/2020", **kwargs):
 	if method in method_list:
-		method = method_list[method](args, clue_dbname="cluedb190322", \
-			clue_dir="data/clues_before_2019-03-22", \
-			vocab_path= "data/dictionaries/vocab_2019-03-22.txt", \
-			stringfeat_path= "data/dictionaries/stringfeats_190322.txt", **kwargs)
+		method = method_list[method](args, clue_dbname="cluedb200618", \
+			clue_dir="data/clues_before_2020-06-18", \
+			vocab_path= "data/dictionaries/vocab_2020-06-18.txt", \
+			stringfeat_path= "data/dictionaries/stringfeats_200618.txt", **kwargs)
 	else: raise Exception("Unregistered method", method)
 	skip = start_from is not None
 	if not exists(ovadir): os.makedirs(ovadir)

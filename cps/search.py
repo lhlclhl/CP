@@ -436,73 +436,14 @@ class MCTS(CPSolver):
 		return max_score, np.array(best_grid, dtype="S"), scores, fdcounts, best_trajectory
 	def autostop_tolerance(self, base, score): return base
 
-class LDS(MCTS):
-	def search_autostop(self, grid, time_limit=0, fdeb=None, answers=None, tolerance=.5, verbose=True, time_scale=60):
-		t0 = time.time()
-		self.time_limit = t0+time_limit if time_limit else 1e11
-		self.action_buf = {}
-		self.state_buf = {}
-		self.n_states = 0
-		self.max_score = -1e9
-		self.best_grid = None
-		self.timings = {"est": [0, 0], "act": [0, 0], "\tclueG": [0, 0], "\tvocabG":[0, 0], "\tsort":[0, 0]}
-		if fdeb:
-			self.answers = answers
-		if answers is not None:
-			agrid = grid.copy()
-			for i in range(len(answers)):
-				for num, ans in answers[i].items():
-					agrid = fill(agrid, i, *self.num2pos[num]. ans, False)
-		else: agrid = None
-
-		max_score, best_grid = -1e9, None
-		self.n_iters, ast = 0, 0
-		max_t_iter = 1 # save at least 1 secs for postprocess
-		last_update = time.time()
-		solutions = {}
-		scores = []
-		fdcounts = []
-		best_trajectory = self.action_list = []
-		try:
-			ds = 0
-			while time.time()+max_t_iter < self.time_limit:
-				ms, bg = self._lds(0, grid, discrepancy_limit=ds)
-				ss = self.get_state_hash(bg, set())
-				if ss not in solutions: solutions[ss] = (ms, bg)
-				rt = self.time_limit - time.time()
-				if ms > max_score:
-					max_score, best_grid = ms, bg
-					best_trajectory = self.action_list
-					last_update = time.time()
-				elif tolerance and time.time() - last_update > ast and int(rt/time_scale) > int((rt-max_t_iter)/time_scale):
-					print("No better grids found in %.2f seconds, break"%(time.time() - last_update))
-					break
-				fdcounts.append(0)
-				ds += 1
-		except KeyboardInterrupt:
-			print("Interupted manually")
-		print("Remaining time: %.4f. Module timings"%rt)
-		for k, (tot_delta_t, n_times) in self.timings.items():
-			print("%s=%.2f/%d=%.3e"%(k, tot_delta_t, n_times, tot_delta_t/(n_times+1e-6)))
-
-		t_pstart = time.time()
-		old_max = max_score
-		max_t_iter = cnt = 0
-		solutions = sorted(solutions.values(), key=lambda x:x[0])
-		while solutions:
-			ms, bg = solutions.pop()
-			t_start = time.time()
-			ms, bg = self.postprocess(ms, bg)
-			max_t_iter = max(max_t_iter, time.time()-t_start)
-			cnt += 1
-			if ms > max_score:
-				max_score, best_grid = ms, bg
-			rt = self.time_limit - time.time()
-			if rt < 0 or math.floor(rt/time_scale) > math.floor((rt-max_t_iter)/time_scale): break
-		print("Postprocessed %d solutions in %.4f seconds, improve reward from %s to %s"%\
-			(cnt, time.time()-t_pstart, old_max, max_score))
-		del solutions
-		return max_score, np.array(best_grid, dtype="S"), scores, fdcounts, best_trajectory
+class MCTS_NM(MCTS): # neural clue matching
+	@property
+	def tau(self): return 0.25
+	@property
+	def CGParams(self): return {		
+		"clue_match": 3,
+		"cluedb_norm": -9,
+	}
 
 class MCTS_DG(MCTS): # for training data generation
 	def generate_data(self, grid, agrid, time_limit, answers):
