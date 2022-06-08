@@ -8,7 +8,7 @@ special_tokens = {
 	"___": "SPECIALTOKENBLANK"
 }
 class ClueES:
-	def __init__(self, dbname="cluedblfs", dirn="data/clues/", es_host='10.176.64.111:9200', \
+	def __init__(self, dbname="cluedblfs", dirn="data/clues_before_2020-09-26/", \
 	new=False, limit=50, norm=0, base=-1, upper=0, idf_path="data/idf.txt", **kwargs):
 		print("ClueES", dbname)
 		self.norm = norm
@@ -16,7 +16,7 @@ class ClueES:
 		self.upper = upper
 		self.limit = limit
 		self.dbname = dbname
-		self.es = Elasticsearch(es_host)
+		self.es = Elasticsearch(**json.load(open("configs/elasticsearch.json")))
 		if not self.es.indices.exists(self.dbname) or new:
 			print("index doesn't exists, creating one")
 			self.initialize()
@@ -26,10 +26,12 @@ class ClueES:
 		self.idf, self.max_idf = get_idf()
 		
 		self.patterns = []
-		with open("data/clue_patterns.txt", encoding="utf-8") as fin:
-			for line in fin:
-				p1, p2 = line.strip("\r\n").split("\t")
-				self.patterns.append((re.compile(p1), re.compile(p2)))
+		rule_file = "data/clue_patterns.txt"
+		if exists(rule_file):
+			with open(rule_file, encoding="utf-8") as fin:
+				for line in fin:
+					p1, p2 = line.strip("\r\n").split("\t")
+					self.patterns.append((re.compile(p1), re.compile(p2)))
 
 		self.params = kwargs
 	def prepclue(self, clue): return clue.strip(string.punctuation).strip()

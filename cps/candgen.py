@@ -1,11 +1,3 @@
-'''TODO:
-1. more delicated clue matching ('tom cruise films')
-2. word features re-orgnization
-3. adjust w2v score: 
-	especially when word not in the dictionary
-	eliminate the words in the clue
-	(maybe) max(w2v, clue-matching),
-'''
 import sys, argparse, json, string, os, time, numpy as np, random, math
 from collections import defaultdict
 from os.path import join, exists
@@ -15,7 +7,6 @@ from queue import Queue
 from .puz_utils import *
 from .utils import BaseObject
 from .cdbretr import ClueES, RetrAndMatch, RAM_CTR, RAM_CTR_NN
-from .fillblank import BlankFiller
 from .reward import Rewarder, ClfRewarder, RNRewarder, CTRewarder, MicroCTR, SMRewarder
 #from .poscls import poscls
 from .clueparser import poscls
@@ -53,6 +44,7 @@ class CandidateGenerator(BaseObject):
 	})
 	@property
 	def options(self): return dict(super().options, **{
+		"idf_path": "data/idf.txt",
 		"synset_path": "data/wordnet/synsets.txt",
 		"clue_dir": "data/clues_full",
 		"clue_dbname": "cluedb210415",
@@ -110,7 +102,8 @@ class CandidateGenerator(BaseObject):
 			"limit": self.cluedb_limit, 
 			"norm": self.cluedb_norm, 
 			"base": self.base_clue_score, 
-			"upper": self.clues_upper
+			"upper": self.clues_upper,
+			"idf_path": self.idf_path
 		}
 		if self.clue_match == 3: 
 			self.clueES = RAM_CTR_NN(MM=1, n_negs=1, batch_size=340, **clueDBparams)
@@ -136,8 +129,8 @@ class CandidateGenerator(BaseObject):
 			self._strings[len(s)].setdefault(0, []).append(i)
 		print("Vocab bucket constructed") # 50.8
 	def init_w2v(self, args, **kwargs):
-		self.wd2id, self.wvecs  = get_w2v()
 		self.wfreqs = get_wprior(pfeat_path=self.stringfeat_path)
+		self.wd2id, self.wvecs  = get_w2v()
 
 	def init_poscls(self, args, delay_poscls=False, **kwargs):
 		if delay_poscls:
@@ -188,13 +181,20 @@ class CandidateGenerator(BaseObject):
 	def init_kbretr(self, args, **kwargs):
 		if self.kb_limit:
 			from .kbretr import KBR_DW
-			self.kbretr = KBR_DW(n_props=self.n_props, with_words=1, vocab_path=self.vocab_path)
+			self.kbretr = KBR_DW(
+				n_props=self.n_props, 
+				with_words=1, 
+				vocab_path=self.vocab_path,
+				idf_path = self.idf_path,
+				synset_path = self.synset_path,
+			)
 	def init_wnretr(self, args, **kwargs):
 		if self.wn_limit:
 			from .dictretr_v2 import W2VNorm
 			self.wnretr = W2VNorm(thres=self.wn_thres)
 	def init_bf(self, args, **kwargs):
 		if self.bf_limit:
+			from .fillblank import BlankFiller
 			self.bf = BlankFiller()
 	def init_mwg(self, args, **kwargs):
 		self.mwg = MWG(
@@ -753,6 +753,7 @@ class CGMF(CGLM): # multi-source features
 
 		if use_wn and len(cvecs) < self.cluedb_limit + use_bf:
 			for w, s, g in self.wnretr.generate(clue, length, limit=use_wn):
+				if math.isnan(s): s = 0
 				if w in cvecs: cvecs[w][0][2] = s
 				else:
 					v = self.drv.copy()
@@ -807,202 +808,3 @@ class CGMF(CGLM): # multi-source features
 		for i in range(len(wposv)):
 			feat[9-i] = (wposv[i]*cluepos[i]).max()
 		return feat
-class CGNV(CGLM): # new vocab
-	@property
-	def w_mapping(self): return { # model weights from linear ranking model
-		0: 16.122467041015625, 
-		1: -0.35808801651000977, 
-		2: 4.171110153198242, 
-		3: -0.6875299215316772, 
-		4: -2.343480110168457, 
-		5: -6.5005340576171875, 
-		6: -0.6366994976997375, 
-		8: 1.2003026008605957, 
-		9: 12.643925666809082, 
-		11: 19.77787208557129, 
-		12: 1.6449849605560303, 
-		17: 42.81391143798828, 
-	}
-	# 	17: 8.274433,
-	# 	0: 6.5,
-	# 	1: 0,
-	# 	2: 0,
-	# 	3: 0,
-	# 	4: 0,
-	# 	5: 0.2150737,
-	# 	6: -0.17480089,
-	# }
-	def init_vocab(self, args, sfile='intermediate/clues_index/fill_strings.txt', **kwargs):
-		self._vocabulary = {} # code[0:cluedb,1:cluedb_derived,2:wordnet,3:wordnet_derived,4:wikitionary,5:wikipedia]
-		self.bitops = np.array([1<<i for i in range(6)], dtype="uint16")
-		print("Loading vocab from", self.vocab_path)
-		with open(self.vocab_path, encoding="utf-8") as fin:
-			for line in fin:
-				word, code = line.strip("\r\n").split("\t")
-				if word.strip() and int(code) != 2: # not derived from wikititles
-					cdb, wn, wkt, wkp = [int(c) for c in code]
-					self._vocabulary[word] = self.bitops.dot(
-					[cdb==1, cdb==2, wn==1, wn==2, wkt==1, wkp==1])
-		print("Vocab Size", len(self._vocabulary)) # 27.2
-		self.construct_vocab_bucket()
-	def init_w2v(self, args, **kwargs):
-		self.wd2id, self.wvecs = get_w2v()
-		self.wfreqs = {}
-		# self.wfreqs: cluedb, wordnet, wiktionary, wikipedia
-		with open(self.unigram_path, encoding="utf-8") as fin:
-			fin.readline()
-			for line in fin:
-				wd, ouni = line.strip("\r\n").rsplit(",", 1)
-				fw = string2fill(wd)
-				self.wfreqs[fw] = self.wfreqs.get(fw, 0) + int(ouni)
-			for w in self.wfreqs: self.wfreqs[w] = math.log(1+self.wfreqs[w])
-	def make_feature(self, word, clue, cluepos, score=0):
-		lword = word.lower()
-		#wposv = self.w_pos.get(lword, self.dpv)
-		wposv = poscls.wpos_distrib(word)
-		feat = self.dfv.copy()
-		# word feature: 0~6
-		src = self._vocabulary.get(word, 0)
-		feat[:len(self.bitops)] = (src&self.bitops)/self.bitops
-		feat[len(self.bitops)] = self.wfreqs.get(word, 0)
-		# clue based score: 10
-		feat[10] = score
-		# word basic info: 11~12
-		feat[11] = self.morph_score(word)
-		feat[12] = len(word)
-		# word prior feats
-		#feat[13:17] = self.wfreqs.get(word, [0, 0, 0, 0])
-		# clue-word score: 17
-		if lword in self.wd2id:
-			vec = self.wd2id[lword]
-			ts = [self.wd2id[t] for t in tokenize(clue) if t in self.wd2id]
-			if ts:
-				# max
-				feat[17] = self.wvecs[ts].dot(self.wvecs[vec]).max()
-				# avg
-				# feat[17] = self.wvecs[ts].dot(self.wvecs[vec]).mean()
-		#feat[19] = (wposv*cluepos).max()
-		# pos tag score: 8~9
-		for i in range(len(wposv)):
-			feat[9-i] = (wposv[i]*cluepos[i]).max()
-		return feat
-class CGSA(CandidateGenerator): # new generation strategy: candidate set aggregation
-	def init_vocab(self, args, sfile='intermediate/clues_index/fill_strings.txt', **kwargs):
-		# small dictionary
-		wcnt = {}
-		for fn in os.listdir(self.clue_dir):
-			with open(join(self.clue_dir, fn), encoding="utf-8") as fin:
-				for line in fin:
-					_, strings = line.rstrip("\r\n").split("\t", 1)
-					for w in strings.split():
-						w = string2fill(w)
-						wcnt[w] = wcnt.get(w, 0) + 1
-		self._sv_buckets = [[] for i in range(self.max_word_len+1)]
-		for w, f in sorted(wcnt.items(), key=lambda x:-x[1]):
-			if 2 < len(w) <= self.max_word_len and len(self._sv_buckets[len(w)]) < self.sv_size:
-				self._sv_buckets[len(w)].append((w, f))
-
-		if self.vocab == "small":
-			self._vocabulary = {string2fill(s) for line in open(sfile, \
-				encoding="utf-8") for s in line.strip("\r\n").split(" ")}
-		else:
-			self._vocabulary = set()
-			with open("data/vocab.txt", encoding="utf-8") as fin:
-				for line in fin:
-					word, code = line.strip("\r\n").split("\t")
-					if int(code) != 2: # not generated from wikititles
-						self._vocabulary.add(word)
-		print("Big vocab Size", len(self._vocabulary))
-		self._fill_strings = list(self._vocabulary)
-		self._fill_strings.sort()
-		self._strings = []
-		for i, s in enumerate(self._fill_strings):
-			while len(s) >= len(self._strings):
-				self._strings.append(defaultdict(set))
-			for j, c in enumerate(s):
-				self._strings[len(s)][(j, c)].add(i)
-			self._strings[len(s)].setdefault(0, []).append(i)
-	def construct_clue_cand_list(self):
-		self.cluedb_cands_list = []
-		words, vecs, positions = [], [], []
-		for i in range(2):
-			candlist = []
-			for num, cands in self.cands_from_cluedb[i].items():
-				while num >= len(candlist): candlist.append(None)
-				candlist[num] = [(w, self.rewards[i, num][w][0])for w in cands][:self.sv_size]
-				n_remains = self.sv_size - len(candlist[num])
-				clue, length = self.clues[i][num]
-				cpos = self.clue_pos[i, num]
-				for word, f in self._sv_buckets[length]:
-					if word not in cands:
-						words.append(word)
-						vecs.append(self.make_feature(word, clue, cpos, 0))
-						positions.append((i, num))
-						n_remains -= 1
-						if n_remains <= 0: break
-			self.cluedb_cands_list.append(candlist)
-		rews = self.predict(np.array(vecs)) if vecs else []
-		for k in range(len(words)):
-			i, num = positions[k]
-			w = words[k]
-			#self.cands_from_cluedb[i][num][w] = (0, None)
-			self.rewards[i, num][w] = [rews[k], 0, 0]
-			self.cluedb_cands_list[i][num].append((w, rews[k]))
-			self.cands_bufs[i, num].clear()
-		self.construct_candbuckets()
-	def construct_candbuckets(self):
-		self.candbuckets = []
-		for i in range(len(directions)):
-			candbuckets = []
-			for candlist in self.cluedb_cands_list[i]:
-				if candlist is not None:
-					candlist.sort(key=lambda x:-x[1])
-					candbucket = defaultdict(set)
-					for k, (w, r) in enumerate(candlist):
-						for j, c in enumerate(w):
-							candbucket.setdefault((j, c), set()).add(k)
-						candbucket.setdefault(0, []).append(k)
-					candbuckets.append(candbucket)
-				else: candbuckets.append(None)
-			self.candbuckets.append(candbuckets)
-	def clear(self): # clear the states after a game is over
-		super().clear()
-		self.candbuckets.clear() 
-	def generate(self, num, i, pattern, blacklist=set(), timings=None):
-		# from generated candidates
-		# if timings:
-		# 	timings["\tclueG"][1] += 1
-		# 	timings["\tclueG"][0] -= time.time()
-
-		cbufs = self.cands_bufs[i, num]
-		ret = cbufs.get(pattern, None)
-		if ret is None:
-			ret = [] # word, reward
-			cand = []
-			for t, c in enumerate(pattern):
-				if c != "*":
-					cs = self.candbuckets[i][num][t, c]
-					cand.append(cs)
-			if cand: 
-				cand = sorted(set.intersection(*cand))
-			else: cand = self.candbuckets[i][num][0]
-			ret = [self.cluedb_cands_list[i][num][t] for t in cand]
-			cbufs[pattern] = ret
-		# if timings:
-		# 	timings["\tclueG"][0] += time.time()
-		
-		# from dictionary
-		if not ret:
-			# if timings:
-			# 	timings["\tvocabG"][1] += 1
-			# 	timings["\tvocabG"][0] -= time.time()
-			for word, rew in self.get_from_vocabulary(num, i, pattern):
-				if word not in blacklist:
-					ret.append((word, rew))
-			# if timings:
-			# 	timings["\tvocabG"][0] += time.time()
-
-		# from multi-word generator
-		if not ret:
-			ret = self.generate_phrase(pattern)
-		return ret

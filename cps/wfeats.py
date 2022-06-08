@@ -15,6 +15,7 @@ def get_w2v(w2v_path=w2v_path):
 		wd2id = {y:x for x, y in enumerate(words)}
 		with h5py.File(join(w2v_path, "vectors.h5"), "r") as dfile:
 			wvecs = dfile["data"][:]
+		print("w2v loaded")
 	return wd2id, wvecs
 
 vocabulary = None
@@ -46,6 +47,7 @@ wfreqs = None
 def get_wprior(pfeat_path=pfeat_path, wfreq_path=wfreq_path):
 	global wfreqs
 	if wfreqs is None:
+		print("loading word prior", pfeat_path)
 		wfreqs = {}
 		with open(pfeat_path, encoding="utf-8") as fin:
 			for line in fin:
@@ -56,6 +58,7 @@ def get_wprior(pfeat_path=pfeat_path, wfreq_path=wfreq_path):
 				wfreqs[fwd][0] += int(odb)
 				wfreqs[fwd][1] += int(ocwg)
 				wfreqs[fwd][3] += int(wt)
+		print("loading word freq", wfreq_path)
 		with open(wfreq_path, encoding="utf-8") as fin:
 			fin.readline()
 			for line in fin:
@@ -67,7 +70,11 @@ def get_wprior(pfeat_path=pfeat_path, wfreq_path=wfreq_path):
 		for k in wfreqs:
 			for i in range(4):
 				wfreqs[k][i] = math.log(1+wfreqs[k][i])
+		print("word prior loaded")
 	return wfreqs
+
+if __name__ == "__main__":
+	get_wprior()
 #wpriors = {}
 # with open(pfeat_path, encoding="utf-8") as fin:
 # 	for line in fin:

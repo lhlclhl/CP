@@ -10,7 +10,6 @@ from cps.puz_utils import *
 from cps.search import *
 
 
-moddir = "models/value_net"
 pzldir = "data/puzzles/"
 outdir = "outputs/"
 detdir = join(outdir, "details_full")
@@ -20,7 +19,6 @@ dbgdir = "intermediate/debug_info"
 bufdir = "intermediate/candidates"
 rwddir = "intermediate/reward_feats"
 if not exists(imddir): os.makedirs(imddir)
-if not exists(moddir): os.makedirs(moddir)
 if not exists(dbgdir): os.makedirs(dbgdir)
 if not exists(bufdir): os.makedirs(bufdir)
 #sys.setrecursionlimit(10000)

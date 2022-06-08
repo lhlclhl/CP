@@ -1,5 +1,14 @@
-Keras==2.3.1
+Unidecode==1.1.1
+editdistance==0.5.3
+elasticsearch==7.12.0
+pymongo==3.11.3
+nlpaug==1.1.4
+numpy==1.19.5
+nltk==3.6.2
+scipy==1.5.3
+h5py==2.10.0
 tensorflow-gpu==1.14.0
+Keras==2.3.1
+bert4keras==0.8.8
 torch==1.2.0
 stanfordnlp==0.2.0
-elasticsearch==7.12.0
