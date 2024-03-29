@@ -31,10 +31,10 @@ data/clues_before_2020-06-18
 - cps/dictretr_v2.py: dictionary retrievel module
 - cps/fillblank.py: blank filling module
 
-### Testing on standard set
+### Evaluating on standard test set
 > run_standard.py
 
-### Testing on hard set
+### Evaluating on hard test set
 > run_hard.py
 
 ### Aggregating test results
