@@ -7,7 +7,7 @@ from os.path import exists, join, split
 
 from .puz_utils import *
 from .utils import *
-from .candgen import CandidateGenerator, CGMF
+from .candgen import *
 
 class CPSolver(BaseObject):
 	@property
@@ -244,7 +244,7 @@ class MCTS(CPSolver):
 			p, num, i, word, ngrid, nbl, fd = actions[r]
 			if ngrid is None: 
 				ngrid = actions[r][4] = fill(grid, i, *self.num2pos[num], word)
-			self.action_list.append((num, i, word, fd))
+			self.action_list.append((num, i, word, fd, actions))
 			ms, bg, _ = self._simulate(depth+1, ngrid, blacklist|set(nbl), fd)
 			if ms > max_score:
 				max_score, best_grid = ms, bg
@@ -279,7 +279,7 @@ class MCTS(CPSolver):
 			if best_child is not None:
 				s, num, i, word, ngrid, nbl, fd = actions[best_child]
 				#if self.fdeb and self.answers: self.log_fill(num, i, word)
-				self.action_list.append((num, i, word, fd))
+				self.action_list.append((num, i, word, fd, actions))
 				reward, best_grid = self._select_and_expand(depth+1, ngrid, blacklist|nbl, fd) # same level, next depth
 				state_item[0] += reward
 				state_item[1] += 1
@@ -332,7 +332,7 @@ class MCTS(CPSolver):
 		return max_score, np.array(best_grid, dtype="S")
 	def search(self, grid, time_limit=0, fdeb=None, answers=None, time_scale=60):
 		return self.search_autostop(grid, time_limit, fdeb, answers, 0, False, time_scale)
-	def search_autostop(self, grid, time_limit=0, fdeb=None, answers=None, tolerance=.5, verbose=True, time_scale=60):
+	def search_autostop(self, grid, time_limit=0, fdeb=None, answers=None, tolerance=.5, verbose=True, time_scale=60, max_rt=None):
 		t0 = time.time()
 		self.time_limit = t0+time_limit if time_limit else 1e11
 		self.fdeb = fdeb
@@ -365,7 +365,7 @@ class MCTS(CPSolver):
 				self.action_list = []
 				ms, bg = self._select_and_expand(0, grid.copy(), set())
 				scores.append(ms)
-				fdcounts.append(sum(int(fd > 0) for n, i, w, fd in self.action_list))
+				fdcounts.append(sum(int(act[3] > 0) for act in self.action_list))
 				self.candgen.update_rewards(ms, bg, self.num2pos)
 				ss = self.get_state_hash(bg, set())
 				if ss not in solutions: solutions[ss] = (ms, bg)
@@ -405,8 +405,13 @@ class MCTS(CPSolver):
 					# 	break
 					ast = self.autostop_tolerance(tolerance*time_scale, max_score)
 				elif tolerance and time.time() - last_update > ast and int(rt/time_scale) > int((rt-max_t_iter)/time_scale):
-					print("No better grids found in %.2f seconds, break"%(time.time() - last_update))
-					break
+					print("No better grids found in %.2f seconds"%(time.time() - last_update), end="...")
+					if max_rt is not None and rt-max_t_iter > max_rt: 
+						print("Remaining time (%.1f) less than max_rt (%.1f), resume"%(rt, max_rt))
+					else: 
+						print("Break")
+						break
+
 				if self.candgen.check_async(): # if the async candidates are generated
 					print('Time: %.2f, async candidate generation is done, update and clear the action buf'%(time.time()-t0))
 					self.candgen.update_cands() # update the async candidates
@@ -438,8 +443,182 @@ class MCTS(CPSolver):
 		return max_score, np.array(best_grid, dtype="S"), scores, fdcounts, best_trajectory
 	def autostop_tolerance(self, base, score): return base
 
+class StateHeap:
+	def __init__ (self):
+		self.pool = [] # state pool
+		self.idle = [] # idle indices
+		self.heap = [] # maximum root heap
+	def push(self, state):
+		if self.idle:
+			idx = self.idle.pop()
+		else:
+			idx = len(self.pool)
+			self.pool.append(None)
+			
+		self.pool[idx] = state
+		self.heappush(idx)
+	def pop(self):
+		if self.heap:
+			idx = self.heappop()
+			self.idle.append(idx)
+			return self.pool[idx]
+		else:
+			return None
+
+	def siftdown(self, startpos, pos):
+		newitem = self.heap[pos]
+		while pos > startpos:
+			parentpos = (pos - 1) >> 1
+			parent = self.heap[parentpos]
+			if self.pool[newitem][0] > self.pool[parent][0]:
+				self.heap[pos] = parent
+				pos = parentpos
+				continue
+			break
+		self.heap[pos] = newitem
+
+	def heappush(self, idx):
+		self.heap.append(idx)
+		self.siftdown(0, len(self.heap)-1)
+
+	def siftup(self, pos):
+		endpos = len(self.heap)
+		startpos = pos
+		newitem = self.heap[pos]
+		childpos = 2*pos + 1    # leftmost child position
+		while childpos < endpos:
+			# Set childpos to index of smaller child.
+			rightpos = childpos + 1
+			if rightpos < endpos and not self.pool[self.heap[childpos]][0] > self.pool[self.heap[rightpos]][0]:
+				childpos = rightpos
+			# Move the smaller child up.
+			self.heap[pos] = self.heap[childpos]
+			pos = childpos
+			childpos = 2*pos + 1
+		# The leaf at pos is empty now.  Put newitem there, and bubble it up
+		# to its final resting place (by sifting its parents down).
+		self.heap[pos] = newitem
+		self.siftdown(startpos, pos)
+	
+	def heappop(self):
+		lastelt = self.heap.pop()
+		if self.heap:
+			returnitem = self.heap[0]
+			self.heap[0] = lastelt
+			self.siftup(0)
+			return returnitem
+		return lastelt
+
+class Astar(MCTS):
+	@property
+	def greedy_factor(self): return 1
+	def heuristic(self, grid):
+		rw, unfilled = self.est_grid(grid)
+		h = 0
+		for i, num, word in unfilled:
+			cands = self.candgen.generate(num, i, word)
+			if cands:
+				_, s = cands[0]
+				h += s
+		return rw, h / self.cp_size, unfilled
+	def get_childrens(self, grid, unfilled):
+		self.timings["act"][1] += 1
+		self.timings["act"][0] -= time.time()
+		childrens = []
+		for i, num, string in unfilled: 
+			cands = self.candgen.generate(num, i, string, timings=self.timings)
+			if len(cands):
+				w, _ = cands[0]
+				g = fill(grid, i, *self.num2pos[num], w)
+				s, h, uf = self.heuristic(g)
+				childrens.append([s+self.greedy_factor * h, s, num, i, w, g, uf]) 
+		childrens.sort(key=lambda x:-x[0])
+		self.timings["act"][0] += time.time()
+		return childrens
+	def search_autostop(self, grid, time_limit=0, fdeb=None, answers=None, tolerance=.5, verbose=True, time_scale=60, **kwargs):
+		t0 = time.time()
+		self.time_limit = t0+time_limit if time_limit else 1e11
+		self.action_buf = {}
+		self.state_buf = {}
+		self.n_states = 0
+		self.max_score = -1e9
+		self.best_grid = None
+		self.timings = {"est": [0, 0], "act": [0, 0], "\tclueG": [0, 0], "\tvocabG":[0, 0], "\tsort":[0, 0]}
+		if fdeb:
+			self.answers = answers
+		if answers is not None:
+			agrid = grid.copy()
+			for i in range(len(answers)):
+				for num, ans in answers[i].items():
+					agrid = fill(agrid, i, *self.num2pos[num], ans, False)
+		else: agrid = None
+
+		self.n_iters, ast = 0, 0
+		max_t_iter = 0
+		last_update = time.time()
+		solutions = {}
+		scores = []
+		fdcounts = []
+		best_trajectory = self.action_list = []
+
+		state_heap = StateHeap()
+		max_score, unfilled = self.est_grid(grid)
+		best_grid = grid
+		scores.append(max_score)
+		fdcounts.append(0)
+		last_t = time.time()
+		try:
+			while last_t+max_t_iter < self.time_limit:
+				self.n_states += 1
+				childrens = self.get_childrens(grid, unfilled)
+				for c in childrens:
+					f, s, num, i, w, g, uf = c
+					ss = self.get_state_hash(g, set())
+					if ss not in solutions: 
+						solutions[ss] = (s, g)
+						if uf:
+							state_heap.push(c)
+						if s > max_score:
+							max_score, best_grid = s, g
+							self.max_score, self.best_grid = max_score, best_grid
+							last_update = time.time()
+
+					rt = self.time_limit - time.time()
+					if tolerance and time.time() - last_update > ast and int(rt/time_scale) > int((rt-max_t_iter)/time_scale):
+						print("No better grids found in %.2f seconds, break"%(time.time() - last_update))
+						break
+				if not state_heap.heap: break
+				f, s, num, i, w, grid, unfilled = state_heap.pop()
+				max_t_iter = max(max_t_iter, time.time() - last_t)
+				last_t = time.time()
+		except KeyboardInterrupt:
+			print("Interupted manually")
+		print("Remaining time: %.4f. Module timings"%rt)
+		for k, (tot_delta_t, n_times) in self.timings.items():
+			print("%s=%.2f/%d=%.3e"%(k, tot_delta_t, n_times, tot_delta_t/(n_times+1e-6)))
+
+		t_pstart = time.time()
+		old_max = max_score
+		max_t_iter = cnt = 0
+		solutions = sorted(solutions.values(), key=lambda x:x[0])
+		while solutions:
+			ms, bg = solutions.pop()
+			t_start = time.time()
+			ms, bg = self.postprocess(ms, bg)
+			max_t_iter = max(max_t_iter, time.time()-t_start)
+			cnt += 1
+			if ms > max_score:
+				max_score, best_grid = ms, bg
+			rt = self.time_limit - time.time()
+			if rt < 0 or math.floor(rt/time_scale) > math.floor((rt-max_t_iter)/time_scale): break
+		print("Postprocessed %d solutions in %.4f seconds, improve reward from %s to %s"%\
+			(cnt, time.time()-t_pstart, old_max, max_score))
+		print("%d solutions found"%len(solutions))
+		del solutions
+		return max_score, np.array(best_grid, dtype="S"), scores, fdcounts, best_trajectory
+
 class LDS(MCTS):
-	def search_autostop(self, grid, time_limit=0, fdeb=None, answers=None, tolerance=.5, verbose=True, time_scale=60):
+	def search_autostop(self, grid, time_limit=0, fdeb=None, answers=None, tolerance=.5, verbose=True, time_scale=60, **kwargs):
 		t0 = time.time()
 		self.time_limit = t0+time_limit if time_limit else 1e11
 		self.action_buf = {}
@@ -506,14 +685,40 @@ class LDS(MCTS):
 		del solutions
 		return max_score, np.array(best_grid, dtype="S"), scores, fdcounts, best_trajectory
 
-class MCTS_NM(MCTS): # neural clue matching
-	@property
-	def tau(self): return 0.25
-	@property
-	def CGParams(self): return {		
-		"clue_match": 3,
-		"cluedb_norm": -9,
-	}
+class DrFill(LDS):
+	def heuristic(self, grid):
+		rw, unfilled = self.est_grid(grid)
+		h = 0
+		for i, num, word in unfilled:
+			cands = self.candgen.generate(num, i, word)
+			if cands:
+				_, s = cands[0]
+				h += s
+		return rw + h / self.cp_size
+	def get_actions(self, grid, blacklist, fold, ss=None, mode=0): # mode0: selection; mode1: simulation
+		score, unfilled = self.est_grid(grid)
+		self.timings["act"][1] += 1
+		self.timings["act"][0] -= time.time()
+		actions = []
+		for i, num, string in unfilled: 
+			cands = self.candgen.generate(num, i, string, timings=self.timings)
+			ff = fold
+			while len(cands) > ff and (i, num, cands[ff][0]) in blacklist: ff += 1
+			if ff < len(cands):
+				w, s = cands[ff]
+				g = fill(grid, i, *self.num2pos[num], w)
+				h = self.heuristic(g)
+				if len(cands) > ff+1:
+					w_, s_ = cands[ff+1]
+					g_ = fill(grid, i, *self.num2pos[num], w_)
+					second_largest_score = self.heuristic(g_)
+				else:
+					second_largest_score = self.heuristic(grid)
+				
+				actions.append([second_largest_score-h, num, i, w, g, blacklist, 0]) 
+		self.timings["act"][0] += time.time()
+		ranked_actions = self.rank_actions(grid, actions)
+		return ranked_actions, score
 
 class MCTS_DG(MCTS): # for training data generation
 	def generate_data(self, grid, agrid, time_limit, answers):

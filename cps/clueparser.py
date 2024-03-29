@@ -48,7 +48,9 @@ def load_wordforms(dfile="data/dictionaries/word_rels_wikt.txt"):
 			word2id[word] = len(id2word)
 			id2word.append(word)
 			c1, c2 = set(), set()
+			wordinfo.append({})
 			for k, v in json.loads(info).items():
+				wordinfo[-1][k] = v
 				c1.add(k)
 				if k == "n":
 					if "iP" in v: c2.add("NNS")
@@ -166,6 +168,9 @@ class LSTMTagger(POSTagger, BaseModel):
 		"dev_ratio": 0.2,
 		"pthres": 0.,
 	})
+	def load(self, save_dir=None): # after loading the models (with vocabulary), re-initialize wpos
+		super().load(save_dir=save_dir)
+		self.init_wpos(None)
 	def build_model(self):
 		inps = []
 		embs = []

@@ -315,6 +315,7 @@ def test_one(mclass=ClueES, clue="Something done for kicks?", length=6, dbname="
 	print(len(ret))
 
 if __name__ == "__main__":
+	#ClueES(new=True)
 	align_scores(ClueES, RAM_CTR, {"norm": -26.39, "upper": 2}, {"norm": -26.39, "upper": 2, "MM": 1, "n_negs": 1, "batch_size": 340})
 	# test_one()
 	# test_one(RAM_CTR, MM=1, n_negs=1, batch_size=340, **{

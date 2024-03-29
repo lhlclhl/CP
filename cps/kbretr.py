@@ -20,7 +20,6 @@ class WikiSplitsES(BaseObject):
 		"synset_path": "data/wordnet/synsets.txt",
 		"dbname": "wikisplits",
 		"src_file_path": "../DPR-master/downloads/data/wikipedia_split/psgs_w100.tsv",
-		"es_host": '10.176.64.111:9200',
 		"new": False,
 		"doc_limit": 20,
 		"idf_path": "data/idf.txt",
@@ -30,7 +29,7 @@ class WikiSplitsES(BaseObject):
 		self.init_es,
 	]
 	def init_es(self, args, **kwargs):
-		self.es = Elasticsearch(self.es_host)
+		self.es = Elasticsearch(**json.load(open("configs/elasticsearch.json")))
 		if not self.es.indices.exists(self.dbname) or self.new:
 			print("index doesn't exists, creating one")
 			mapping = {
@@ -97,8 +96,6 @@ class KBRetriever(WikiSplitsES):
 	def options(self): return dict(super().options, **{
 		"dbname": "wikisplits_linked",
 		"src_file_path": "/mnt/clh25/wikidata/wiki_splits1.txt",
-		"es_host": '10.176.64.111:9200',
-		"kgdb": "mongodb://10.176.40.145:27017",
 		"wiki_db_path": "data/wiki/index_enwiki-latest.db",
 		"wiki_title_path": "data/wiki/wikititles.txt",
 		"pred_cnt_path": "data/wiki/pred_cnts.txt",
@@ -118,7 +115,7 @@ class KBRetriever(WikiSplitsES):
 		self.idf, self.max_idf = get_idf(path=self.idf_path)
 		self._vocabulary = get_vocab(self.vocab_path)
 	def init_kg(self, args, **kwargs):
-		client = pymongo.MongoClient(self.kgdb)
+		client = pymongo.MongoClient(**json.load(open("configs/mongodb.json")))
 		self.kg_col = client.wikidata.triples
 		self.kg_inv_col = client.wikidata.inv_triples
 		self.kg_buf = {}

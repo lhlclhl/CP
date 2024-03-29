@@ -13,8 +13,7 @@ class BlankFiller(BaseObject):
 	@property
 	def options(self): return dict(super().options, **{
 		"dbname": "wiki_titles",
-		"src_file_path": "/mnt/clh25/wikidata/outputs/wikititles.txt",
-		"es_host": '10.176.64.111:9200',
+		"src_file_path": "data/wiki/wikititles.txt",
 		"new": False,
 		"doc_limit": 20,
 		"idf_path": "data/idf_wikititle.txt",
@@ -30,7 +29,7 @@ class BlankFiller(BaseObject):
 			self.init_es,
 		]
 	def init_es(self, args, **kwargs):
-		self.es = Elasticsearch(self.es_host)
+		self.es = Elasticsearch(**json.load(open("configs/elasticsearch.json")))
 		if not self.es.indices.exists(self.dbname) or self.new:
 			print("index doesn't exists, creating one")
 			mapping = {
@@ -193,7 +192,7 @@ class BlankFillerProb(BlankFiller):
 	@property
 	def params(self): return dict(super().params, **{
 		"smooth": 0.1,
-		"eta": 0.04
+		"eta": 0.
 	})
 	@property
 	def initializations(self): 
