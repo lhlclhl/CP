@@ -34,7 +34,7 @@ data/clues_before_2020-06-18
 ### Testing on standard set
 > run_standard.py
 
-### Testing on standard set
+### Testing on hard set
 > run_hard.py
 
 ### Aggregating test results
