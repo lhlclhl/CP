@@ -11,9 +11,9 @@ data/puzzles/nyt.valid.txt
 nyt.shuffle.txt
 
 ## Datasets (Clues)
-### Seen clues for test set
+### Seen clues for test set （conmpressed）
 data/clues_before_2020-09-26
-### Seen clues for validation set
+### Seen clues for validation set （conmpressed）
 data/clues_before_2020-06-18
 
 ## Codes
