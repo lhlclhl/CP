@@ -20,7 +20,7 @@ class CandidateGenerator(BaseObject):
 		2. Wordnet gloss
 		3. Wiki
 		4. Vocabulary
-		5. (optinal)  Multiword Generator/Char Sequence Generator
+		5.  Multiword Generator/Char Sequence Generator
 	'''
 	@property
 	def params(self): return dict(super().params, **{
@@ -118,6 +118,9 @@ class CandidateGenerator(BaseObject):
 		print("Vocab Size", len(self._vocabulary)) # 27.2
 		self.construct_vocab_bucket()
 	def construct_vocab_bucket(self):
+		''' 
+		Contructing dictionary buckets for a certain length and one-letter constraint for quick word filtering during search
+		'''
 		self._fill_strings = list(self._vocabulary)
 		self._fill_strings.sort()
 		self._strings = []
@@ -203,6 +206,9 @@ class CandidateGenerator(BaseObject):
 		)
 		self.mw_buf = {}
 	def generate_phrase(self, cseq):
+		''' 
+		Phrase generation
+		'''
 		if len(cseq) < self.min_phrase_char: return []
 		nm = cseq.count("*")
 		if nm==0 or nm / len(cseq) > self.pg_thres: return []
@@ -245,6 +251,9 @@ class CandidateGenerator(BaseObject):
 					rew[1] += score
 					rew[2] += 1
 	def prepare_candidates(self, pos, clue, length, use_kb, use_wn, use_bf, clue_bl={}):
+		''' 
+		Geneartion clue-dependent candidates before the search
+		'''
 		cands = self.clueES.generate(clue, length, freq_black=clue_bl.get(pos, {}))
 		
 		if use_bf:
@@ -277,6 +286,9 @@ class CandidateGenerator(BaseObject):
 				candlist[num].sort(key=lambda x:-x[1])
 			self.cluedb_cands_list.append(candlist)
 	def postag_clues(self, clues):
+		''' 
+		Predicting the postag of the answers according to the clue with a LSTM classifier
+		'''
 		if not hasattr(poscls, "_pmodel"): 
 			poscls.load()
 			print("POS cls loaded.")
@@ -481,6 +493,9 @@ class CandidateGenerator(BaseObject):
 		feats.clear()
 		return ret	
 	def get_from_vocabulary(self, num, i, pattern):
+		''' 
+		Vocabulary generation
+		'''
 		if (i, num, pattern) in self.cands_from_vocab: ret = self.cands_from_vocab[i, num, pattern]
 		else:
 			clue = self.clues[i][num][0]

@@ -8,6 +8,9 @@ special_tokens = {
 	"___": "SPECIALTOKENBLANK"
 }
 class ClueES:
+	''' 
+	Seen clue retriever with only BM25 score
+	'''
 	def __init__(self, dbname="cluedblfs", dirn="data/clues_before_2020-09-26/", \
 	new=False, limit=50, norm=0, base=-1, upper=0, idf_path="data/idf.txt", **kwargs):
 		print("ClueES", dbname)
@@ -65,6 +68,9 @@ class ClueES:
 		result = self.es.indices.put_mapping(index=self.dbname, body=mapping)
 		print(result)
 	def construct(self, dirn):
+		''' 
+		Construct the ES database with seen clue files
+		'''
 		docs = {}
 		if self.dbname.startswith("cluedb"):
 			print("loading from", dirn)
@@ -101,6 +107,9 @@ class ClueES:
 		helpers.bulk(self.es, (item for item in data_gen(docs)))
 		for item in data_gen(docs): pass
 	def generate(self, clue, length, limit=None, blacklist=set(), **kwargs):
+		''' 
+		Generating answers given clues, with ES retrieving and rule scoring/normalization
+		'''
 		if limit is None: limit = self.limit
 		ctokens = tokenize(clue)
 		blacklist = blacklist | {string2fill(t) for t in ctokens} # should not include any words in the clue
@@ -135,6 +144,9 @@ class ClueES:
 		cands = [(w, W*max(s/Z-B, 0), c) for w, s, c in cands]
 		return cands
 	def retrieve(self, clue, length, limit=50, blacklist=set(), pagesize=50, target_clue=None, freq_black={}):
+		''' 
+		Retrieving seen clues from ES
+		'''
 		ret = []
 		exs = blacklist
 		fb = freq_black.copy() # block some answers certain times
@@ -173,6 +185,9 @@ class ClueES:
 		return ret
 
 class RetrAndMatch(ClueES):
+	''' 
+	Retrieving with BM25 and matching with neural networks
+	'''
 	@property
 	def matcher(self):
 		if not hasattr(self, "_matcher"):
@@ -195,6 +210,9 @@ class RetrAndMatch(ClueES):
 		cands = [(cands[i][0], scores[i]*abs(norm), cands[i][-1]) for i in inds]
 		return cands
 class RAM_CTR(RetrAndMatch):
+	''' 
+	Retrieving and matching with different matching models
+	'''
 	@property
 	def matcher(self):
 		if not hasattr(self, "_matcher"):
@@ -250,6 +268,9 @@ class RAM_CTR(RetrAndMatch):
 		cands = [(w, W*max(s/Z-B, 0), c) for w, s, c in cands]
 		return cands
 class RAM_CTR_NN(RAM_CTR):
+	''' 
+	With score normalization tricks
+	'''
 	def generate(self, clue, length, limit=None, blacklist=set(), pagesize=None, **kwargs):
 		if limit is None: limit = self.limit
 		ctokens = tokenize(clue)
@@ -271,61 +292,3 @@ class RAM_CTR_NN(RAM_CTR):
 		Z = 1-base
 		cands = [(w, (s-base)/Z*W, c) for w, s, c in cands][:limit]
 		return cands
-
-def align_scores(mc1, mc2, kwargs1={}, kwargs2={}, pzlfile="data/puzzles/nyt.new.ra.txt", limit=100):
-	m1 = mc1(dbname="cluedblfs", dirn="data/clues", **kwargs1)
-	m2 = mc2(dbname="cluedblfs", dirn="data/clues", **kwargs2)
-	ks = []
-	with open(pzlfile, encoding="utf-8") as fin:
-		for line in fin:
-			puzzle = json.loads(line)
-			pzlid = puzzle["date"]
-			try:
-				grid, num2pos, pos2num, clues, answers, agrid = construct_grid(puzzle)
-			except Exception as e: 
-				continue
-			if agrid.dtype != np.dtype("S1"):
-				continue
-			s1 = s2 = 0
-			for i in range(len(clues)):
-				for num, (text, l) in clues[i].items():
-					ans = answers[i][num]
-					cands1 = m1.generate(text, l, limit=50)
-					w = None
-					for w, s, c in cands1:
-						if ans == w: break
-					if w == ans: s1 += s
-					cands2 = m2.generate(text, l, limit=50)
-					w = None
-					for w, s, c in cands2:
-						if ans == w: break
-					if w == ans: s2 += s
-			ks.append(s1/s2)
-			#print("s1/s2=%.4f/%.4f=%f"%(s1/len(clues), s2/len(clues), ks[-1]))
-			print(ks[-1])
-			limit -= 1
-			if limit == 0: break
-	print("Average K: %s"%(sum(ks)/len(ks)))
-
-def test_one(mclass=ClueES, clue="Something done for kicks?", length=6, dbname="cluedb210415", dirn="data/clues_full", norm=-26.39, **kwargs):
-	cluedb = mclass(dbname=dbname, dirn=dirn, norm=norm, **kwargs)#ClueES(dbname="cluedb190322", dirn="data/clues_before_2019-03-22")#
-	ret = cluedb.generate(clue, length)#'Marks so as to avoid bouncing, perhaps', 8)#, target_clue="John McTammany, inventor of the player ___")
-	for item in ret:
-		print(item)
-	print(len(ret))
-
-if __name__ == "__main__":
-	#ClueES(new=True)
-	align_scores(ClueES, RAM_CTR, {"norm": -26.39, "upper": 2}, {"norm": -26.39, "upper": 2, "MM": 1, "n_negs": 1, "batch_size": 340})
-	# test_one()
-	# test_one(RAM_CTR, MM=1, n_negs=1, batch_size=340, **{
-	# 		"dbname": "cluedb210415", 
-	# 		"dirn": "data/clues_full", 
-	# 		"limit": 50, 
-	# 		"norm": -22.17, 
-	# 		"base": -1, 
-	# 		"upper": 0
-	# 	})
-	
-	#test_one(clue="Tipping point?", length=3)
-
